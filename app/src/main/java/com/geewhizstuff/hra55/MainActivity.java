@@ -1,9 +1,11 @@
 package com.geewhizstuff.hra55;
 
 import android.media.MediaPlayer;
+import android.os.AsyncTask;
 import android.os.CountDownTimer;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
+import android.util.Log;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
@@ -12,6 +14,16 @@ import android.widget.TextView;
 
 import com.mixpanel.android.mpmetrics.MixpanelAPI;
 
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
+
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.net.MalformedURLException;
+import java.net.URL;
 import java.util.ArrayList;
 import java.util.Random;
 
@@ -19,11 +31,6 @@ public class MainActivity extends AppCompatActivity {
 
     final static int TIME_FOR_QUESTION = 15;
     final static int NUM_ANSWERS = 5;
-    final static String[] QUESTIONS = {"First question", "Second question", "Third question"};
-    final static String[][] ANSWERS = {
-            {"First1", "First2", "First3", "First4", "First5"},
-            {"Second1", "Second2", "Second3", "Second4", "Second5"},
-            {"Third1", "Third2", "Third3", "Third4", "Third5"}};
 
     int questionNumber = 0;
     int correctAnswers = 0;
@@ -60,25 +67,66 @@ public class MainActivity extends AppCompatActivity {
             timer.cancel();
         }
 
-        setQuestion(QUESTIONS[questionNumber], ANSWERS[questionNumber]);
         questionNumber++;
-        if (questionNumber >= QUESTIONS.length)
-            questionNumber = 0;
-
         correctAnswers = 0;
 
-        timer = new CountDownTimer(TIME_FOR_QUESTION * 1000, 1000) {
-            @Override
-            public void onTick(long millisUntilFinished) {
-                ((TextView)findViewById(R.id.timeLeft)).setText("" + millisUntilFinished/1000);
-            }
+        new LoadQuestion().execute(questionNumber);
+    }
 
-            @Override
-            public void onFinish() {
-                nextQuestion();
+    class LoadQuestion extends AsyncTask<Integer, Void, String[]> {
+
+        @Override
+        protected String[] doInBackground(Integer... params) {
+            try {
+                URL url = new URL("https://hra55-1108.appspot.com/command?action=get_qa&n=" + params[0]);
+                InputStream is = url.openStream();
+                BufferedReader br = new BufferedReader(new InputStreamReader(is));
+                StringBuilder str = new StringBuilder(is.available());
+                String line;
+                while ((line = br.readLine()) != null) str.append(line);
+
+                JSONObject json = new JSONObject(str.toString());
+
+                String[] result = new String[NUM_ANSWERS + 1];
+                result[0] = json.getString("question");
+                JSONArray answers = json.getJSONArray("answers");
+                for (int i = 0; i < NUM_ANSWERS; i++) {
+                    result[i+1] = answers.getJSONArray(i).getString(0);
+                }
+
+                return result;
+            } catch (Exception e) {
+                e.printStackTrace();
+                return new String[] {"Network error", "", "", "", "", ""};
             }
-        };
-        timer.start();
+        }
+
+        @Override
+        protected void onPostExecute(String[] strings) {
+            super.onPostExecute(strings);
+
+            String question = strings[0];
+            String[] answers = new String[NUM_ANSWERS];
+            Log.d("TAG", question);
+            for (int i = 0; i < NUM_ANSWERS; i++) {
+                answers[i] = strings[i+1];
+                Log.d("TAG", answers[i]);
+            }
+            setQuestion(question, answers);
+
+            timer = new CountDownTimer(TIME_FOR_QUESTION * 1000, 1000) {
+                @Override
+                public void onTick(long millisUntilFinished) {
+                    ((TextView)findViewById(R.id.timeLeft)).setText("" + millisUntilFinished/1000);
+                }
+
+                @Override
+                public void onFinish() {
+                    nextQuestion();
+                }
+            };
+            timer.start();
+        }
     }
 
     private void setQuestion(String question, String[] answers) {
@@ -120,11 +168,11 @@ public class MainActivity extends AppCompatActivity {
 
     public synchronized void submit(View view) {
         EditText responseText = (EditText) findViewById(R.id.response);
-        String response = responseText.getText().toString();
+        String response = responseText.getText().toString().toLowerCase().trim();
         boolean found=false;
         int i;
         for(i=0;i<currentAnswers.length;i++) {
-            if (currentAnswers[i].equals(response)) {
+            if (currentAnswers[i].toLowerCase().trim().equals(response)) {
                 found = true;
                 break;
             }
@@ -134,7 +182,7 @@ public class MainActivity extends AppCompatActivity {
             int id;
             id = getResources().getIdentifier("answer"+(i+1), "id", getPackageName());
             TextView answerView = (TextView) findViewById(id);
-            if (!answerView.getText().equals(response)) {
+            if (!answerView.getText().toString().toLowerCase().trim().equals(response)) {
                 correctAnswers++;
                 correctPlayers.get(random.nextInt(correctPlayers.size())).start();
             }
